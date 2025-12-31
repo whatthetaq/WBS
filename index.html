@@ -1,48 +1,164 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Whistleblowing System</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f5f5f5;
-      padding: 40px;
+import { z } from "zod";
+import { Agent, AgentInputItem, Runner, withTrace } from "@openai/agents";
+
+const FormaterSchema = z.object({ summary: z.array(z.string()), category: z.string(), source_type: z.string() });
+const normalizer = new Agent({
+  name: "normalizer",
+  instructions: `You are a text normalizer.
+Do not analyze, interpret, infer, or add meaning.
+Only rewrite the text into clear, neutral, formal Indonesian or english (depends on the input)
+Preserve all facts.
+No opinions.
+Output plain text only.`,
+  model: "gpt-5-nano",
+  modelSettings: {
+    reasoning: {
+      effort: "minimal"
+    },
+    store: true
+  }
+});
+
+const summarizer = new Agent({
+  name: "summarizer",
+  instructions: `You summarize reports.
+Do not analyze causes, impacts, or intent.
+Do not add assumptions.
+Summarize facts only.
+Use maximum 3 bullet points.
+Each bullet max 30 words.
+Neutral tone.`,
+  model: "gpt-5-nano",
+  modelSettings: {
+    reasoning: {
+      effort: "minimal"
+    },
+    store: true
+  }
+});
+
+const clasifier = new Agent({
+  name: "clasifier",
+  instructions: `Classify the report into ONE category only.
+Choose from the predefined list.
+Do not explain.
+Do not justify.
+Output only the category name.
+`,
+  model: "gpt-5-nano",
+  modelSettings: {
+    reasoning: {
+      effort: "low"
+    },
+    store: true
+  }
+});
+
+const formater = new Agent({
+  name: "formater",
+  instructions: `Format the input strictly into the provided JSON schema.
+Do not add fields.
+Do not remove fields.
+If data is missing, leave empty string.`,
+  model: "gpt-5-nano",
+  outputType: FormaterSchema,
+  modelSettings: {
+    reasoning: {
+      effort: "minimal"
+    },
+    store: true
+  }
+});
+
+type WorkflowInput = { input_as_text: string };
+
+
+// Main code entrypoint
+export const runWorkflow = async (workflow: WorkflowInput) => {
+  return await withTrace("wbs test", async () => {
+    const state = {
+
+    };
+    const conversationHistory: AgentInputItem[] = [
+      { role: "user", content: [{ type: "input_text", text: workflow.input_as_text }] }
+    ];
+    const runner = new Runner({
+      traceMetadata: {
+        __trace_source__: "agent-builder",
+        workflow_id: "wf_6954861856348190b8444c7523bb67c70d235d8f16ddfabb"
+      }
+    });
+    const normalizerResultTemp = await runner.run(
+      normalizer,
+      [
+        ...conversationHistory
+      ]
+    );
+    conversationHistory.push(...normalizerResultTemp.newItems.map((item) => item.rawItem));
+
+    if (!normalizerResultTemp.finalOutput) {
+        throw new Error("Agent result is undefined");
     }
-    .box {
-      max-width: 700px;
-      margin: auto;
-      background: white;
-      padding: 30px;
-      border-radius: 8px;
+
+    const normalizerResult = {
+      output_text: normalizerResultTemp.finalOutput ?? ""
+    };
+    const summarizerResultTemp = await runner.run(
+      summarizer,
+      [
+        ...conversationHistory
+      ]
+    );
+    conversationHistory.push(...summarizerResultTemp.newItems.map((item) => item.rawItem));
+
+    if (!summarizerResultTemp.finalOutput) {
+        throw new Error("Agent result is undefined");
     }
-    textarea {
-      width: 100%;
-      height: 160px;
-      margin-top: 10px;
+
+    const summarizerResult = {
+      output_text: summarizerResultTemp.finalOutput ?? ""
+    };
+    const clasifierResultTemp = await runner.run(
+      clasifier,
+      [
+        ...conversationHistory,
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: `Fraud
+          Gratification
+          Conflict of Interest
+          Harassment
+          Process Violation
+          Other` }
+          ]
+        }
+      ]
+    );
+    conversationHistory.push(...clasifierResultTemp.newItems.map((item) => item.rawItem));
+
+    if (!clasifierResultTemp.finalOutput) {
+        throw new Error("Agent result is undefined");
     }
-    button {
-      margin-top: 15px;
-      padding: 10px 20px;
+
+    const clasifierResult = {
+      output_text: clasifierResultTemp.finalOutput ?? ""
+    };
+    const formaterResultTemp = await runner.run(
+      formater,
+      [
+        ...conversationHistory
+      ]
+    );
+    conversationHistory.push(...formaterResultTemp.newItems.map((item) => item.rawItem));
+
+    if (!formaterResultTemp.finalOutput) {
+        throw new Error("Agent result is undefined");
     }
-  </style>
-</head>
 
-<body>
-
-<div class="box">
-  <h1>Whistleblowing System</h1>
-
-  <p>
-    This page is a prototype for submitting whistleblowing reports.
-    Please use dummy data only.
-  </p>
-
-  <label>Report:</label>
-  <textarea placeholder="Type your report here..."></textarea>
-
-  <button>Submit</button>
-</div>
-
-</body>
-</html>
+    const formaterResult = {
+      output_text: JSON.stringify(formaterResultTemp.finalOutput),
+      output_parsed: formaterResultTemp.finalOutput
+    };
+  });
+}
